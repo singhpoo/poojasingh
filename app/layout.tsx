@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     description:
       "Azure Monitor, workbooks, log analytics & E2E testing agents. Personal observability dashboard, minus the incidents.",
     type: "website",
-    url: "https://poojamonitor.vercel.app",
+    url: "https://poojasingh.vercel.app",
   },
   twitter: {
     card: "summary_large_image",

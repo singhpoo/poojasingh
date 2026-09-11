@@ -11,7 +11,7 @@ export default function Hero() {
         Hi, I&apos;m Pooja.
         <br />
         <span className="gradient">
-          I make Azure observable — and I teach agents to do the clicking.
+          I keep the telemetry flowing — and I teach agents to do the clicking.
         </span>
       </h1>
       <RotatingRole roles={rotatingRoles} />
@@ -33,7 +33,7 @@ export default function Hero() {
       </div>
       <p className="hero-hint rise d4">
         psst — there&apos;s a query bar below. Type <kbd>help</kbd> and press Enter.
-        Yes, it works. No, it&apos;s not real KQL.
+        <kbd>uname</kbd> runs in a real Vercel Sandbox. Yes, really.
       </p>
       <KqlBar />
     </header>

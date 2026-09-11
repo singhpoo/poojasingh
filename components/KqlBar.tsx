@@ -2,148 +2,127 @@
 
 import { useState, type KeyboardEvent } from "react";
 import { links } from "@/lib/data";
+import type { KqlLine } from "@/app/api/kql/route";
 
-type OutLine = { text: string; cls?: string };
+// Commands that navigate the page — no server round trip.
+const NAV: Record<string, string> = {
+  work: "work",
+  about: "work",
+  projects: "projects",
+  repos: "projects",
+  contact: "contact",
+  email: "contact",
+  hire: "contact",
+};
 
-const HELP: OutLine[] = [
+const HELP: KqlLine[] = [
   { text: "available commands", cls: "dim" },
   { text: "  help          → this menu", cls: "sky" },
   { text: "  work          → what I do (vaguely, on purpose)" },
   { text: "  projects      → shipped & shipping" },
   { text: "  contact       → say hi" },
   { text: "  whoami        → identity query" },
+  { text: "  uname · date · uptime · ls · df → REAL commands, run in a vercel sandbox ⚡" },
   { text: "  coffee        → check the coffee metric" },
-  { text: "  logs          → peek at the live tail" },
   { text: "  clear         → clean slate", cls: "dim" },
 ];
 
-function runCommand(raw: string): { lines: OutLine[]; scrollTo?: string; mailto?: boolean } {
-  const cmd = raw.trim().toLowerCase();
-
-  switch (cmd) {
-    case "help":
-    case "?":
-      return { lines: [...HELP, { text: "" }, { text: "query executed in 42ms ☁", cls: "dim" }] };
-    case "work":
-    case "about":
-      return {
-        lines: [
-          { text: "joining tables: experience ⟕ skills ...", cls: "dim" },
-          { text: "4 rows returned → navigating to //what I actually do", cls: "ok" },
-        ],
-        scrollTo: "work",
-      };
-    case "projects":
-    case "repos":
-      return {
-        lines: [
-          { text: "summarize projects by fun = desc ...", cls: "dim" },
-          { text: "4 projects found → scrolling you there", cls: "ok" },
-        ],
-        scrollTo: "projects",
-      };
-    case "contact":
-    case "email":
-    case "hire":
-      return {
-        lines: [
-          { text: "rendering contact card ...", cls: "dim" },
-          { text: "1 mailbox found → scrolling you there", cls: "ok" },
-        ],
-        scrollTo: "contact",
-      };
-    case "whoami":
-      return {
-        lines: [
-          { text: "singhpoo", cls: "ok" },
-          { text: "senior software engineer · microsoft" },
-          { text: "likes: kql, agents, dashboards · dislikes: flaky tests" },
-          { text: "query executed in 8ms", cls: "dim" },
-        ],
-      };
-    case "coffee":
-    case "☕":
-      return {
-        lines: [
-          { text: "coffee_metric | summarize level = percentile(caffeine, 90)", cls: "dim" },
-          { text: "☕ level: healthy (3 cups) · alert rule: refill if < 1", cls: "ok" },
-        ],
-      };
-    case "logs":
-      return {
-        lines: [
-          { text: "tailing LogBar ... it's the bar at the bottom of your screen 👀", cls: "sky" },
-        ],
-      };
-    case "sudo hire pooja":
-      return {
-        lines: [
-          { text: "[sudo] access granted ✔", cls: "ok" },
-          { text: "opening mail client ... great decision", cls: "ok" },
-        ],
-        mailto: true,
-      };
-    case "vercel":
-      return {
-        lines: [
-          { text: "▲ everything I ship lives on Vercel — this site included", cls: "sky" },
-          { text: "build time: seconds. fun level: 100%", cls: "dim" },
-        ],
-      };
-    case "clear":
-    case "cls":
-      return { lines: [] };
-    case "":
-      return { lines: [{ text: "type something :) (try `help`)", cls: "dim" }] };
-    default:
-      return {
-        lines: [
-          { text: `KqlSyntaxError: '${raw.trim()}' is not a recognized command.`, cls: "err" },
-          { text: "to be fair, I'm a website, not a real query engine. try `help`", cls: "dim" },
-        ],
-      };
-  }
-}
+const PENDING: KqlLine = { text: "▸ executing ...", cls: "dim" };
 
 export default function KqlBar() {
   const [value, setValue] = useState("");
-  const [out, setOut] = useState<OutLine[]>([]);
+  const [out, setOut] = useState<KqlLine[]>([]);
+  const [pending, setPending] = useState(false);
 
-  const submit = (cmd: string) => {
-    const result = runCommand(cmd);
-    if (cmd.trim().toLowerCase() === "clear" || cmd.trim().toLowerCase() === "cls") {
+  const push = (lines: KqlLine[]) => setOut((prev) => [...prev, ...lines]);
+
+  // Replace the transient "executing..." line with the real result.
+  const settle = (lines: KqlLine[]) =>
+    setOut((prev) => {
+      const idx = prev.lastIndexOf(PENDING);
+      if (idx === -1) return [...prev, ...lines];
+      return [...prev.slice(0, idx), ...lines, ...prev.slice(idx + 1)];
+    });
+
+  const submit = async (raw: string) => {
+    const cmd = raw.trim();
+    const lower = cmd.toLowerCase();
+    if (!cmd) {
+      push([{ text: "type something :) (try `help`)", cls: "dim" }]);
+      return;
+    }
+    push([{ text: `> ${cmd}`, cls: "sky" }]);
+
+    if (lower === "clear" || lower === "cls") {
       setOut([]);
-    } else {
-      setOut((prev) => [
-        ...prev,
-        { text: `> ${cmd.trim()}`, cls: "sky" },
-        ...result.lines,
+      return;
+    }
+
+    if (NAV[lower]) {
+      push([
+        { text: "joining tables ...", cls: "dim" },
+        { text: "rows found → scrolling you there", cls: "ok" },
       ]);
-    }
-    if (result.scrollTo) {
       document
-        .getElementById(result.scrollTo)
+        .getElementById(NAV[lower])
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
     }
-    if (result.mailto) {
-      window.location.href = `mailto:${links.email}?subject=Let%27s%20build%20something%20fun`;
+
+    setPending(true);
+    push([PENDING]);
+    try {
+      const res = await fetch("/api/kql", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ command: cmd }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const data = (await res.json()) as { lines?: KqlLine[]; meta?: string };
+      const lines = data.lines ?? [];
+      settle(lines.length ? lines : [{ text: "(nothing came back)", cls: "dim" }]);
+      if (data.meta) push([{ text: `▸ ${data.meta}`, cls: "dim" }]);
+      if (lower === "sudo hire pooja") {
+        window.location.href = `mailto:${links.email}?subject=Let%27s%20build%20something%20fun`;
+      }
+    } catch {
+      settle([
+        {
+          text: "KqlSyntaxError: the query engine took a coffee break. try again?",
+          cls: "err",
+        },
+      ]);
+    } finally {
+      setPending(false);
     }
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !pending) {
       submit(value);
       setValue("");
     }
   };
 
+  const chips = [
+    "help",
+    "whoami",
+    "uname",
+    "work",
+    "projects",
+    "coffee",
+    "sudo hire pooja",
+  ];
+
   return (
     <div className="kql-wrap rise d3">
       <div className="kql-titlebar" aria-hidden>
-        <span className="tl" style={{ background: "#ff5f57" }} />
-        <span className="tl" style={{ background: "#febc2e" }} />
-        <span className="tl" style={{ background: "#28c840" }} />
-        <span className="file">pooja.monitor/logs — query editor (playground edition)</span>
+        <span className="tl" style={{ background: "#f0a8a8" }} />
+        <span className="tl" style={{ background: "#f5d9a8" }} />
+        <span className="tl" style={{ background: "#a5e8c5" }} />
+        <span className="file">
+          pooja.monitor/logs — query editor (sandbox-backed playground)
+        </span>
       </div>
       <div className="kql-input-row">
         <span className="prompt">&gt;</span>
@@ -151,7 +130,7 @@ export default function KqlBar() {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={onKey}
-          placeholder="run a query on me — type help and press Enter"
+          placeholder="try help — or uname for a real command in a vercel sandbox"
           aria-label="KQL playground query bar"
           spellCheck={false}
           autoComplete="off"
@@ -167,8 +146,13 @@ export default function KqlBar() {
         </div>
       )}
       <div className="kql-chips">
-        {["help", "whoami", "work", "projects", "coffee", "sudo hire pooja"].map((c) => (
-          <button key={c} onClick={() => submit(c)} type="button">
+        {chips.map((c) => (
+          <button
+            key={c}
+            onClick={() => !pending && submit(c)}
+            disabled={pending}
+            type="button"
+          >
             {c}
           </button>
         ))}
